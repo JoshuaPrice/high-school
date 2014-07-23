@@ -1,0 +1,270 @@
+#Takes all awards info from tournament URL and puts it in the MySQL table "awards"
+#Takes tournament info and puts it in the MySQL table "tour_info"
+
+from HTMLParser import HTMLParser
+from datetime import datetime
+import mysql.connector
+import urllib2
+
+global awardsstring
+awardsstring = ""
+#class used to make the string of data from awards
+class MyHTMLParser(HTMLParser):
+    def handle_data(self, data):
+	global awardsstring
+	awardsstring = awardsstring + data + ",,,"
+
+#from urlfinder.py
+
+today = datetime.strftime(datetime.now(),"%Y-%m-%d")
+now = str(datetime.utcnow())
+
+#Makes a string named tournament_string out of the URL's Source Code
+searchpage = "http://www.robotevents.com/robot-competitions/vex-robotics-competition?limit=all"
+url_string = ' '
+for item in urllib2.urlopen(searchpage):
+    if '<h5><a href="http://www.robotevents.com/robot-competitions/vex-robotics-competition' in item:
+	url_string = url_string + item + ".html"
+#    if '<td colspan=4><b>Past Events:</b></td>' in item:
+#	url_string = url_string + item + ".html"
+#only for getting just recents
+
+url_string_split1 = url_string.split('<h5><a href="http://www.robotevents.com/robot-competitions/vex-robotics-competition/windward-school-early-scrimmage.html" title="Windward School Early Scrimmage">Windward School Early Scrimmage</a></h5>')
+tossuponly = url_string_split1[0]
+recentslist = tossuponly.split('.html')
+
+for x in xrange(len(recentslist)/2):
+    if "title=" in recentslist[x]:
+	recentslist.pop(x)
+    if recentslist[x] == '':
+	recentslist.pop(x)
+    if '<h5><a href="' in recentslist[x]:
+	recentslist[x] = recentslist[x].replace('<h5><a href="', ' ')
+	recentslist[x] = recentslist[x].strip()
+	recentslist[x] = recentslist[x] + ".html"
+	print recentslist[x]
+
+recentslist.pop(-1)
+#end from urlfinderall.py
+
+mysqlconnect = mysql.connector.connect(user="gfr", password="5327", database="scouting")
+cursor = mysqlconnect.cursor()
+
+#getting all skus from match_result
+cursor.execute('select sku from tour_info')
+result = cursor.fetchall()
+skulist = []
+for row in result:
+    skulist.append(row[0])
+
+#Makes a string named tournament_string out of the URL Source Code
+for x in xrange(len(recentslist)-1):
+    print " "
+    print "New Tournament:"
+    tournamenturl= recentslist[x].strip()
+    source =  tournamenturl #tournamenturl
+    print source
+    #Continue if link is good
+    tournament_string = " "
+    datestringmaker = 0
+    leaguedatemaker = 0
+    datestring = " "
+    for item in urllib2.urlopen(source):
+        tournament_string = tournament_string + item
+        #Catch the line with the SKU
+        if "Event Code:" in item:
+	     skustring = item
+        if '<tr><td colspan="2" class="reTitle">' in item:
+	     namestring = item
+        if '<tr><th>Capacity:</th> <td>' in item:
+	     sizestring = item
+        if '<tr><th>City:</th> <td>' in item:
+	     citystring = item
+        if  '<tr><th>State:</th> <td>' in item:
+	     statestring = item
+        if '<tr><th>Country:</th> <td>' in item:
+	     countrystring = item
+        if '<tr><th>Dates:</th>' in item:
+	     datestringmaker = 1
+        if datestringmaker == 1:
+	     datestring = datestring + item
+	     if '</td>' in item:
+	         datestringmaker = 0
+
+    if (('RE-VRC-13' in skustring) or ('RE-VRC-14' in skustring)): #tournaments we want
+        #Narrows down the SKU to what we want: RE-VRC-13-####
+        skustring = skustring.replace('<div class="product-sku"><b>Event Code:</b>', ' ')
+        skustring = skustring.replace('</div>', ' ')
+        skustring = skustring.strip()
+        tournamentsku = skustring
+        print "Tournament SKU:", tournamentsku #Take this out when code is finished
+
+        #Narrows down name of tournament to what we want
+        namestring = namestring.replace('<tr><td colspan="2" class="reTitle">', ' ')
+        namestring = namestring.replace('</td> </tr>', ' ')
+        namestring = namestring.strip()
+        tournamentname = namestring
+	tournamentname = tournamentname.replace('\\','')
+        print "Tournament Name:", tournamentname
+    
+        #Narrows down size (capacity) of tournament to what we want
+        sizestring = sizestring.replace('<tr><th>Capacity:</th> <td>', ' ')
+        sizestring = sizestring.replace('</td> </tr>', ' ')
+        sizestring = sizestring.strip()
+        tournamentsize = sizestring
+        print "Tournament Capacity:", tournamentsize 
+
+        leagueonezero = 0
+
+
+        #date using datestring
+        if '<th style="text-align:left;">Location:</th>' in datestring: #it is a league
+	    leagueonezero = 1
+	    datestring = datestring.replace('<tr><th>Dates:</th>', ' ')
+	    datestring = datestring.replace('<th style="text-align:left;">Location:</th>', ' ')
+	    datestring = datestring.replace('</tr>', ' ')
+	    datestring = datestring.strip()
+	    datelist = datestring.split('td>')
+	    leaguedatestring = ""
+	    for x in xrange(len(datelist)):
+	        if "201" in datelist[x]:
+		     datelist[x] = datelist[x].replace('<tr><th>', ' ')
+		     datelist[x] = datelist[x].replace('</th><', ' ')
+		     datelist[x] = datelist[x].strip()
+		     leaguedatestring = leaguedatestring + datelist[x] + ", "
+	        else:
+		     datelist[x] = ",,,"
+	    lastdate = datelist[-6] #the last league date is always the 6th to last one in the array
+	    lastdatearray = lastdate.split('/')
+	    leaguedatemonth = lastdatearray[-3]
+	    leaguedateday = lastdatearray[-2]
+	    leaguedateyear = lastdatearray[-1]
+	    tournamentdate = leaguedateyear + "-" + leaguedatemonth + "-" + leaguedateday
+	    print "Final League Event Date:", tournamentdate
+        else: #it is not a league
+	    leagueonezero = 0
+    	    datestring = datestring.replace('<tr><th>Dates:</th>', ' ')
+    	    datestring = datestring.replace('<td>', ' ')
+    	    datestring = datestring.replace('</td>', ' ')
+	    tourdatearray = datestring.split()
+	    dateyear = tourdatearray[-1]
+	    #replace month words with numbers
+	    changedatemonth = tourdatearray[-3]
+	    changedatemonth = changedatemonth.replace('January', '01')
+	    changedatemonth = changedatemonth.replace('February', '02')
+	    changedatemonth = changedatemonth.replace('March', '03')
+	    changedatemonth = changedatemonth.replace('April', '04')
+	    changedatemonth = changedatemonth.replace('May', '05')
+	    changedatemonth = changedatemonth.replace('June', '06')
+	    changedatemonth = changedatemonth.replace('July', '07')
+  	    changedatemonth = changedatemonth.replace('August', '08')
+	    changedatemonth = changedatemonth.replace('September', '09')
+	    changedatemonth = changedatemonth.replace('October', '10')
+	    changedatemonth = changedatemonth.replace('November', '11')
+	    changedatemonth = changedatemonth.replace('December', '12')
+	    datemonth = changedatemonth
+	    changedateday = tourdatearray[-2].replace(',', '')
+	    if len(changedateday) == 1:
+		    changedateday = changedateday.replace('1', '01')
+		    changedateday = changedateday.replace('2', '02')
+		    changedateday = changedateday.replace('3', '03')
+		    changedateday = changedateday.replace('4', '04')
+		    changedateday = changedateday.replace('5', '05')
+		    changedateday = changedateday.replace('6', '06')
+		    changedateday = changedateday.replace('7', '07')
+		    changedateday = changedateday.replace('8', '08')
+		    changedateday = changedateday.replace('9', '09')
+	    dateday = changedateday
+    	    tournamentdate = dateyear + "-" + datemonth + "-" + dateday
+    	    print "Tournament Date:", tournamentdate
+    
+        #Narrows down to tournament location
+        #City
+        citystring = citystring.replace('<tr><th>City:</th> <td>', ' ')
+        citystring = citystring.replace('</td> </tr>', ' ')
+        citystring = citystring.strip()
+        tournamentcity = citystring
+        #State
+        statestring = statestring.replace('<tr><th>State:</th> <td>', ' ')
+        statestring = statestring.replace('</td> </tr>', ' ')
+        statestring = statestring.strip()
+        tournamentstate = statestring
+        #Country
+        countrystring = countrystring.replace(' <tr><th>Country:</th> <td>', ' ')
+        countrystring = countrystring.replace('</td> </tr>', ' ')
+        countrystring = countrystring.strip()
+        tournamentcountry = countrystring
+        #City, State, Country combined
+        if len(statestring) > 1: #there is actually a state
+            tournamentlocation = tournamentcity + ", " + tournamentstate + ", " + tournamentcountry
+            print "Tournament Location:", tournamentlocation
+        else: #there is no state (a foreign country)
+            tournamentlocation = tournamentcity + ", " + tournamentcountry
+            print "Tournament Locaiton:", tournamentlocation
+   
+    
+        #Enter tournament information into tour_info table
+        if tournamentdate <= today:
+            alreadyin = 0
+            for tour_number in range(len(skulist)):
+                if tournamentsku == skulist[tour_number]:
+                    alreadyin = 1
+                    print 'already in'
+            if alreadyin == 0:
+                print "not in yet"
+                add_tournament = ("insert into tour_info "
+    		          "(sku, tour_name, tour_date, tour_location, tour_size, tour_url, league) "
+    		          "values (%s, %s, %s, %s, %s, %s, %s)")
+                tournament_data = (tournamentsku, tournamentname, tournamentdate, tournamentlocation, tournamentsize, tournamenturl, leagueonezero)
+                cursor.execute(add_tournament, tournament_data)
+                mysqlconnect.commit()
+                print "League? :", leagueonezero
+                skulist.append(tournamentsku)
+            elif alreadyin == 1:
+                tournamentname = tournamentname.translate(None, "'")
+                tournamentname = tournamentname.translate(None, '"')
+                cursor.execute("update tour_info set tour_name = '"+tournamentname+"', tour_date = '"+tournamentdate+"', tour_location = '"+tournamentlocation+"', tour_size = '"+tournamentsize+"', tour_url = '"+tournamenturl+"' where sku = '"+tournamentsku+"'")
+    else:
+	 print 'Not a Toss Up Tournament!!'
+
+
+#getting all tournament urls
+cursor.execute('select tour_url from tour_info')
+result = cursor.fetchall()
+urlstring = ""
+for row in result:
+    urlstring = urlstring + row[0] + ",,," 
+
+urllist = urlstring.split(",,,")
+urllist.pop(-1)
+
+#DELETE BAD LINKS
+for x in xrange(len(urllist)):
+    try:
+        urllib2.urlopen(urllist[x])
+    except urllib2.HTTPError, e:
+        print(e.code)
+        print "Something Wrong 1"
+        cursor.execute("delete from tour_info where tour_url='"+urllist[x]+"'")
+        mysqlconnect.commit()
+        print "Link: ", urllist[x]
+        print "Tournament deleted!"
+        link_exists=0
+    except urllib2.URLError, e:
+        print(e.args)
+        print "Something Wrong 2"
+        print "Link: ", urllist[x]
+        cursor.execute("delete from tour_info where tour_url='"+urllist[x]+"'")
+        mysqlconnect.commit()
+        print "Tournament deleted!"
+        link_exists=0
+
+#update data log
+cursor.execute("update data_log set datetime = '"+now+"', notes = 'none' where program = 'parsetournaments.py'")
+mysqlconnect.commit()
+
+cursor.close()
+mysqlconnect.close()
+#End Program
+
+
