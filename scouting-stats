@@ -1,0 +1,365 @@
+#Calculate average match score, average opponent score, average margin
+
+import mysql.connector
+from datetime import datetime
+
+now = str(datetime.utcnow())
+mysqlconnect = mysql.connector.connect(user="gfr", password="5327", database="scouting")
+cursor = mysqlconnect.cursor()
+
+#getting all skus from match_result
+cursor.execute('select sku from live')
+result = cursor.fetchall()
+skulist = []
+for row in result:
+    skulist.append(row[0])
+print skulist
+
+####################Team Stats########################
+
+for x in xrange(len(skulist)):
+    teamlist=[]
+    tournament = skulist[x]
+    #getting all team numbers in from result
+    print skulist[x]
+    cursor.execute("SELECT red1, red2, blue1, blue2 FROM match_result WHERE sku = '"+tournament+"'")
+    result = cursor.fetchall()
+    for row in result:
+        alreadyinlist = 0
+        for color in range(4):
+            for x in xrange(len(teamlist)):
+                if row[color] == teamlist[x]:
+                    alreadyinlist = 1
+            if alreadyinlist == 0:
+                teamlist.append(row[color])
+    teamlist.sort()
+    print teamlist
+    print len(teamlist)
+
+    for z in range(len(teamlist)):
+        #wins, losses, and ties taken from rankings
+        team_upper = teamlist[z]
+        team_upper = team_upper.upper()
+        cursor.execute("SELECT rank, wins, losses, ties FROM rankings WHERE sku = '"+tournament+"' and teamnum = '"+team_upper+"'")
+        result = cursor.fetchall()
+        for row in result:
+            teamrank = row[0]
+            teamwins = row[1]
+            teamlosses = row[2]
+            teamties = row[3]
+
+        ###########################Qualification Statistics#########################
+        cursor.execute("SELECT * FROM match_result WHERE sku = '"+tournament+"' and round = '2' and ((red1 = '"+team_upper+"') or (red2 = '"+team_upper+"') or (blue1 = '"+team_upper+"') or (blue2 = '"+team_upper+"'))")
+        result = cursor.fetchall()
+        scorearray = []
+        opponentscorearray = []
+        for row in result:
+            if row[8] == team_upper or row[9] == team_upper or row[10] == team_upper: #team is red
+                redblue = 0 #team is on red alliance                
+                scorearray.append(row[14]) #red score
+                opponentscorearray.append(row[15]) #blue score
+            elif row[11] == team_upper or row[12] == team_upper or row[13] == team_upper: #team is blue
+                redblue = 1 #team is on blue alliance
+                scorearray.append(row[15])
+                opponentscorearray.append(row[14])
+        totalpoints = 0
+        totalopponentpoints = 0
+        num_matches_total = len(scorearray)
+        num_matches = int(teamwins)+int(teamlosses)+int(teamties)
+        print "Number of matches: ", num_matches
+        for counter in range(num_matches_total):
+            totalpoints += scorearray[counter]
+            totalopponentpoints += opponentscorearray[counter]
+        if num_matches == 0:
+            winpercent =  0
+            averagescore = 0
+            averageopponentscore = 0
+            averagemargin = 0
+        else:
+            winpercent = 100*(float(teamwins)/float(num_matches))
+            averagescore = float(float(totalpoints)/float(num_matches))
+            averageopponentscore = float(float(totalopponentpoints)/float(num_matches))
+            averagemargin = averagescore - averageopponentscore
+
+        #Average rank
+        num_teams = len(teamlist)
+        ratio = float(10.0/float(num_teams))
+        reverserankof10 = float(teamrank)*float(ratio)
+        rankof10 = float(10-reverserankof10)
+        cursor.execute("select teamnum from statistics where teamnum='"+team_upper+"' and sku='"+tournament+"' and type='qual'")
+        statcheckresult = cursor.fetchall()
+        print statcheckresult
+        if len(statcheckresult) == 0:
+            add_wlt = ("insert into statistics "
+            "(sku, teamnum, win_percent, wins, loss, ties, avg_match_score, avg_opponent_score, avg_margin, avg_rank, type) "
+            "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+            wlt_data = (tournament, teamlist[z], winpercent, teamwins, teamlosses, teamties, averagescore, averageopponentscore, averagemargin, rankof10, 'qual') #Insert team into database
+            cursor.execute(add_wlt, wlt_data)
+            mysqlconnect.commit()
+        else: #there is stuff in statcheckresult
+            cursor.execute("update statistics set win_percent = '"+str(winpercent)+"', wins = '"+str(teamwins)+"', loss = '"+str(teamlosses)+"', ties = '"+str(teamties)+"', avg_match_score='"+str(averagescore)+"', avg_opponent_score='"+str(averageopponentscore)+"', avg_margin='"+str(averagemargin)+"', avg_rank='"+str(rankof10)+"' where (sku = '"+tournament+"' and teamnum='"+team_upper+"' and type='qual')")
+            print "Win percent:", winpercent,"%"  
+        print "Number of Teams:", 
+        print "Team Number:", teamlist[z]
+        print "Wins, Losses, and Ties:", teamwins ,teamlosses, teamties      
+        print "Average Score:", averagescore
+        print "Average Opponent Score:", averageopponentscore
+        print "Average Margin:", averagemargin
+        print "Rank out of 10:", rankof10
+        print ""
+
+        ##########################Elimination Statistics###################################
+        cursor.execute("SELECT * FROM match_result WHERE sku = '"+tournament+"' and (round = '3' or round = '4' or round = '5') and ((red1 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (red2 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (red3 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (blue1 ='"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"') or (blue2 = '"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"') or (blue3 = '"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"'))")
+        result = cursor.fetchall()
+        scorearray = []
+        opponentscorearray = []
+        elimmatches=0
+        wincount=0
+        tiecount=0
+        losscount=0
+        print "Number of elimination Round Matches:", len(result)
+        for row in result:
+            if row[8] == teamlist[z] or row[9] == teamlist[z] or row[10] == teamlist[z]: #team is red
+                redblue = 0 #team is on red alliance                
+                scorearray.append(row[14]) #red score
+                opponentscorearray.append(row[15]) #blue score
+                elimmatches=elimmatches+1
+            elif row[11] == teamlist[z] or row[12] == teamlist[z] or row[13] == teamlist[z]: #team is blue
+                redblue = 1 #team is on blue alliance
+                scorearray.append(row[15])
+                opponentscorearray.append(row[14])
+                elimmatches=elimmatches+1
+        for x in xrange(len(scorearray)):
+            if scorearray[x] > opponentscorearray[x]:
+                wincount+=1
+            elif scorearray[x] == opponentscorearray[x]:
+                tiecount+=1
+            elif scorearray[x] < opponentscorearray[x]:
+                losscount+=1
+        print "Elimination W-L-T: ", wincount, losscount, tiecount
+        if elimmatches > 0:
+            totalpoints = 0
+            totalopponentpoints = 0
+            for counter in range(len(scorearray)):
+                num_matches=len(scorearray)
+                totalpoints += scorearray[counter]
+                totalopponentpoints += opponentscorearray[counter]
+            averagescore = float(float(totalpoints)/float(elimmatches))
+            averageopponentscore = float(float(totalopponentpoints)/float(elimmatches))
+            averagemargin = averagescore - averageopponentscore
+
+            #Win %
+            elimwinpercent = (float(wincount)/float(elimmatches))*100.0
+
+            #Average rank
+            num_teams = len(teamlist)
+            ratio = float(10.0/float(num_teams))
+            reverserankof10 = float(teamrank)*float(ratio)
+            rankof10 = float(10-reverserankof10)
+            cursor.execute("select teamnum from statistics where teamnum='"+teamlist[z]+"' and sku='"+tournament+"' and type='elim'")
+            statcheckresult = cursor.fetchall()
+            print statcheckresult
+            if len(statcheckresult) == 0:
+                add_wlt = ("insert into statistics "
+                "(sku, teamnum, win_percent, wins, loss, ties, avg_match_score, avg_opponent_score, avg_margin, type) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                wlt_data = (tournament, teamlist[z], elimwinpercent, wincount, losscount, tiecount, averagescore, averageopponentscore, averagemargin, 'elim') #Insert team into database
+                cursor.execute(add_wlt, wlt_data)
+                mysqlconnect.commit()
+            elif len(statcheckresult) > 0:
+                cursor.execute("update statistics set win_percent = '"+str(elimwinpercent)+"', wins = '"+str(wincount)+"', loss = '"+str(losscount)+"', ties = '"+str(tiecount)+"', avg_match_score='"+str(averagescore)+"', avg_opponent_score='"+str(averageopponentscore)+"', avg_margin='"+str(averagemargin)+"' where sku = '"+tournament+"' and teamnum='"+teamlist[z]+"' and type='elim'")
+            print "Number of Teams:", 
+            print "Team Number:", teamlist[z]
+            print "Wins, Losses, and Ties:", teamwins ,teamlosses, teamties
+            print "Win percent:", winpercent,"%"        
+            print "Average Score:", averagescore
+            print "Average Opponent Score:", averageopponentscore
+            print "Average Margin:", averagemargin
+            print "Rank out of 10:", rankof10
+            print ""
+
+#############Match Difficulties
+for x in xrange(len(skulist)):
+    tournament = skulist[x]
+
+    cursor.execute("SELECT * FROM match_result where sku='"+tournament+"'")
+    result = cursor.fetchall()
+    for row in result:
+        match_id = str(row[0])
+        print match_id
+        if row[8]==row[16]: #red1 sits out
+            redA = row[9]
+            redB = row[10]
+        elif row[9]==row[16]: #red2 sits out
+            redA = row[8]
+            redB = row[10]
+        elif row[10]==row[16]: #red3 sits out
+            redA = row[8]
+            redB = row[9]
+        else: #qual match
+            redA = row[8]
+            redB = row[9]
+
+        if row[11]==row[17]: #blue1 sits out
+            blueA = row[12]
+            blueB = row[13]
+        elif row[12]==row[17]: #blue2 sits out
+            blueA = row[11]
+            blueB = row[13]
+        elif row[13]==row[17]: #blue3 sits out
+            blueA = row[11]
+            blueB = row[12]
+        else: #qual match
+            blueA = row[11]
+            blueB = row[12]
+        cursor.execute("SELECT avg_match_score FROM statistics WHERE sku = '"+tournament+"' and type='qual' and teamnum = '"+redA+"'")
+        redAresult = cursor.fetchall()
+        for row in redAresult:
+            redAdiff = row[0]
+            print redA, ": ", row[0]
+        cursor.execute("SELECT avg_match_score FROM statistics WHERE sku = '"+tournament+"' and type='qual' and teamnum = '"+redB+"'")
+        redBresult = cursor.fetchall()
+        for row in redBresult:
+            redBdiff = row[0]
+            print redB, ": ", row[0]
+        cursor.execute("SELECT avg_match_score FROM statistics WHERE sku = '"+tournament+"' and type='qual' and teamnum = '"+blueA+"'")
+        blueAresult = cursor.fetchall()
+        for row in blueAresult:
+            blueAdiff = row[0]
+            print blueA, ": ", row[0]
+        cursor.execute("SELECT avg_match_score FROM statistics WHERE sku = '"+tournament+"' and type='qual' and teamnum = '"+blueB+"'")
+        blueBresult = cursor.fetchall()
+        for row in blueBresult:
+            blueBdiff = row[0]
+            print blueB, " Blue B: ", row[0]
+    
+        redAdifficulty = ((blueAdiff+blueBdiff)/2.000)-((redBdiff)/2.000)
+        redAdifficulty1 = str(redAdifficulty)
+        redBdifficulty = ((blueAdiff+blueBdiff)/2.000)-((redAdiff)/2.000)
+        redBdifficulty1 = str(redBdifficulty)
+        blueAdifficulty = ((redAdiff+redBdiff)/2.000)-((blueBdiff)/2.000)
+        blueAdifficulty1 = str(blueAdifficulty)
+        blueBdifficulty = ((redAdiff+redBdiff)/2.000)-((blueAdiff)/2.000)
+        blueBdifficulty1 = str(blueBdifficulty)
+        print "RedA Difficulty: ", redAdifficulty1
+        cursor.execute("update match_result set redA_difficulty = '"+redAdifficulty1+"', redB_difficulty = '"+redBdifficulty1+"', blueA_difficulty = '"+blueAdifficulty1+"', blueB_difficulty = '"+blueBdifficulty1+"' where id = '"+match_id+"'")
+        mysqlconnect.commit()
+
+
+##############Team Schedule Difficulties -Qualification
+for x in xrange(len(skulist)):
+    teamlist=[]
+    tournament = skulist[x]
+    #getting all team numbers in from result
+    print skulist[x]
+    cursor.execute("SELECT red1, red2, blue1, blue2 FROM match_result WHERE sku = '"+tournament+"'")
+    result = cursor.fetchall()
+    for row in result:
+        alreadyinlist = 0
+        for color in range(4):
+            for x in xrange(len(teamlist)):
+                if row[color] == teamlist[x]:
+                    alreadyinlist = 1
+            if alreadyinlist == 0:
+                teamlist.append(row[color])
+    teamlist.sort()
+
+    for z in range(len(teamlist)):
+        print teamlist[z]
+        team = str(teamlist[z])
+        #qualification difficulty
+        cursor.execute("SELECT * FROM match_result WHERE sku = '"+tournament+"' and round = '2' and ((red1 = '"+teamlist[z]+"') or (red2 = '"+teamlist[z]+"') or (blue1 = '"+teamlist[z]+"') or (blue2 = '"+teamlist[z]+"'))")
+        result = cursor.fetchall()
+        difficultyarray = []
+        for row in result:
+            redAdifficulty = float(row[20])
+            redBdifficulty = float(row[21])
+            blueAdifficulty = float(row[22])
+            blueBdifficulty = float(row[23])
+            if row[8] == teamlist[z]: #team is redA      
+                difficultyarray.append(redAdifficulty)#difficulty of match for red
+            elif row[9] == teamlist[z]: #team is redB  
+                difficultyarray.append(redBdifficulty)#difficulty of match for red           
+            if row[11] == teamlist[z]: #team is blueA      
+                difficultyarray.append(blueAdifficulty)#difficulty of match for blue
+            elif row[12] == teamlist[z]: #team could be blueA or blueB          
+                difficultyarray.append(blueBdifficulty)#difficulty of match for blue
+        print difficultyarray
+        
+        totaldifficulty = 0
+        for counter in range(len(difficultyarray)):
+            num_matches=len(difficultyarray)
+            totaldifficulty += difficultyarray[counter]
+        averagedifficulty = str((totaldifficulty)/(num_matches))
+        print teamlist[z], averagedifficulty
+        cursor.execute("update statistics set avg_difficulty = '"+averagedifficulty+"' where (teamnum = '"+teamlist[z]+"' and type = 'qual')")
+        mysqlconnect.commit()
+
+################## Team Schedule Difficulties - Elimination
+for x in xrange(len(skulist)):
+    teamlist=[]
+    tournament = skulist[x]
+    #getting all team numbers in from result
+    print skulist[x]
+    cursor.execute("SELECT red1, red2, blue1, blue2 FROM match_result WHERE sku = '"+tournament+"'")
+    result = cursor.fetchall()
+    for row in result:
+        alreadyinlist = 0
+        for color in range(4):
+            for x in xrange(len(teamlist)):
+                if row[color] == teamlist[x]:
+                    alreadyinlist = 1
+            if alreadyinlist == 0:
+                teamlist.append(row[color])
+    teamlist.sort()
+
+    for z in range(len(teamlist)):
+        print teamlist[z]
+        team = str(teamlist[z])
+        #qualification difficulty
+        cursor.execute("SELECT * FROM match_result WHERE sku = '"+tournament+"' and (round = '3' or round = '4' or round = '5') and ((red1 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (red2 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (red3 = '"+teamlist[z]+"' and redsit != '"+teamlist[z]+"') or (blue1 = '"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"') or (blue2 = '"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"') or (blue3 = '"+teamlist[z]+"' and bluesit != '"+teamlist[z]+"'))")
+        result = cursor.fetchall()
+        difficultyarray = []
+        for row in result:
+            redAdifficulty = float(row[20])
+            redBdifficulty = float(row[21])
+            blueAdifficulty = float(row[22])
+            blueBdifficulty = float(row[23])
+            if row[8] == teamlist[z] and row[16] != teamlist[z]: #team is redA      
+                difficultyarray.append(redAdifficulty)#difficulty of match for red
+            elif row[9] == teamlist[z] and row[16] != teamlist[z]: #team could be redA or redB  
+                if row[8] == teamlist[16]: #team is redA
+                    difficultyarray.append(redAdifficulty)#difficulty of match for red
+                if row[10] == teamlist[16]: #team is redB
+                    difficultyarray.append(redBdifficulty)#difficulty of match for red              
+            elif row[10] == teamlist[z] and row[16] != teamlist[z]: #team is redA      
+                difficultyarray.append(redBdifficulty)#difficulty of match for red
+            if row[11] == teamlist[z] and row[17] != teamlist[z]: #team is blueA      
+                difficultyarray.append(blueAdifficulty)#difficulty of match for blue
+            elif row[12] == teamlist[z] and row[17] != teamlist[z]: #team could be blueA or blueB      
+                if row[11] == teamlist[16]: #team is blueA
+                    difficultyarray.append(blueAdifficulty)#difficulty of match for blue
+                if row[13] == teamlist[16]: #team is blueB
+                    difficultyarray.append(blueBdifficulty)#difficulty of match for blue           
+            elif row[13] == teamlist[z] and row[17] != teamlist[z]: #team is blueB     
+                difficultyarray.append(blueBdifficulty)#difficulty of match for blue
+        print difficultyarray
+        
+        totaldifficulty = 0
+        for counter in range(len(difficultyarray)):
+            num_matches=len(difficultyarray)
+            totaldifficulty += difficultyarray[counter]
+        averagedifficulty = str((totaldifficulty)/(num_matches))
+        print teamlist[z], averagedifficulty
+        cursor.execute("update statistics set avg_difficulty = '"+averagedifficulty+"' where (teamnum = '"+teamlist[z]+"' and type = 'elim')")
+        mysqlconnect.commit()
+
+#update data log
+cursor.execute("update data_log set datetime = '"+now+"', notes = 'none' where program = 'statslive.py'")
+mysqlconnect.commit()
+
+cursor.close()
+mysqlconnect.close()
+#End program
+
+
